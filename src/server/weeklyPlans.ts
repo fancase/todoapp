@@ -13,8 +13,8 @@ import {
   toWeeklyPlanDtos,
 } from "./dto";
 
-async function assertGoalExists(id: ObjectId): Promise<void> {
-  if (!(await goalsCol().findOne({ _id: id }, { projection: { _id: 1 } }))) {
+async function assertGoalExists(userId: ObjectId, id: ObjectId): Promise<void> {
+  if (!(await goalsCol().findOne({ userId, _id: id }, { projection: { _id: 1 } }))) {
     throw badRequest("연결하려는 1년 목표가 존재하지 않습니다");
   }
 }
@@ -27,26 +27,27 @@ function assertRange(startDate: string, endDate: string): void {
   }
 }
 
-export async function listWeeklyPlans(): Promise<WeeklyPlanDto[]> {
-  const plans = await plansCol().find({}).sort({ startDate: 1, _id: 1 }).toArray();
-  return toWeeklyPlanDtos(plans);
+export async function listWeeklyPlans(userId: ObjectId): Promise<WeeklyPlanDto[]> {
+  const plans = await plansCol().find({ userId }).sort({ startDate: 1, _id: 1 }).toArray();
+  return toWeeklyPlanDtos(userId, plans);
 }
 
-export async function getWeeklyPlan(id: ObjectId): Promise<WeeklyPlanDetailDto> {
-  const plan = await plansCol().findOne({ _id: id });
+export async function getWeeklyPlan(userId: ObjectId, id: ObjectId): Promise<WeeklyPlanDetailDto> {
+  const plan = await plansCol().findOne({ userId, _id: id });
   if (!plan) throw notFound("주간 계획");
   const [[dto], todos] = await Promise.all([
-    toWeeklyPlanDtos([plan]),
-    todosCol().find({ weeklyPlanId: id }).sort(TODO_SORT).toArray(),
+    toWeeklyPlanDtos(userId, [plan]),
+    todosCol().find({ userId, weeklyPlanId: id }).sort(TODO_SORT).toArray(),
   ]);
-  return { ...dto, todos: await toTodoDtos(todos) };
+  return { ...dto, todos: await toTodoDtos(userId, todos) };
 }
 
-export async function createWeeklyPlan(input: WeeklyPlanCreateInput): Promise<WeeklyPlanDto> {
+export async function createWeeklyPlan(userId: ObjectId, input: WeeklyPlanCreateInput): Promise<WeeklyPlanDto> {
   const goalId = input.goalId ? parseId(input.goalId) : null;
-  if (goalId) await assertGoalExists(goalId);
+  if (goalId) await assertGoalExists(userId, goalId);
   const now = new Date();
   const doc: Omit<WeeklyPlan, "_id"> = {
+    userId,
     title: input.title,
     startDate: input.startDate,
     endDate: input.endDate,
@@ -55,15 +56,16 @@ export async function createWeeklyPlan(input: WeeklyPlanCreateInput): Promise<We
     updatedAt: now,
   };
   const { insertedId } = await plansCol().insertOne(doc as WeeklyPlan);
-  const [dto] = await toWeeklyPlanDtos([{ ...doc, _id: insertedId }]);
+  const [dto] = await toWeeklyPlanDtos(userId, [{ ...doc, _id: insertedId }]);
   return dto;
 }
 
 export async function updateWeeklyPlan(
+  userId: ObjectId,
   id: ObjectId,
   patch: WeeklyPlanPatchInput,
 ): Promise<WeeklyPlanDto> {
-  const existing = await plansCol().findOne({ _id: id });
+  const existing = await plansCol().findOne({ userId, _id: id });
   if (!existing) throw notFound("주간 계획");
   assertRange(patch.startDate ?? existing.startDate, patch.endDate ?? existing.endDate);
   const set: Partial<WeeklyPlan> = { updatedAt: new Date() };
@@ -72,29 +74,29 @@ export async function updateWeeklyPlan(
   if (patch.endDate !== undefined) set.endDate = patch.endDate;
   if (patch.goalId !== undefined) {
     const goalId = patch.goalId ? parseId(patch.goalId) : null;
-    if (goalId) await assertGoalExists(goalId);
+    if (goalId) await assertGoalExists(userId, goalId);
     set.goalId = goalId;
   }
   const updated = await plansCol().findOneAndUpdate(
-    { _id: id },
+    { userId, _id: id },
     { $set: set },
     { returnDocument: "after" },
   );
   if (!updated) throw notFound("주간 계획");
-  const [dto] = await toWeeklyPlanDtos([updated]);
+  const [dto] = await toWeeklyPlanDtos(userId, [updated]);
   return dto;
 }
 
 /** Deletes the plan and unlinks its todos atomically. Returns the number of unlinked todos. */
-export async function deleteWeeklyPlan(id: ObjectId): Promise<number> {
+export async function deleteWeeklyPlan(userId: ObjectId, id: ObjectId): Promise<number> {
   return getClient().withSession((session) =>
     session.withTransaction(async () => {
       const unlinked = await todosCol().updateMany(
-        { weeklyPlanId: id },
+        { userId, weeklyPlanId: id },
         { $set: { weeklyPlanId: null, updatedAt: new Date() } },
         { session },
       );
-      const deleted = await plansCol().deleteOne({ _id: id }, { session });
+      const deleted = await plansCol().deleteOne({ userId, _id: id }, { session });
       if (deleted.deletedCount === 0) throw notFound("주간 계획");
       return unlinked.modifiedCount;
     }),

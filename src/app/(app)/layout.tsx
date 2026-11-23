@@ -1,5 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { AppShell, NavLinks } from "@/components/app-shell";
+import { UserBadge } from "@/components/user-badge";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -12,6 +13,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       bottomNav={
         <Suspense fallback={<div className="h-14" />}>
           <NavLinks variant="bottom" />
+        </Suspense>
+      }
+      userSlot={
+        <Suspense fallback={null}>
+          <UserBadge />
         </Suspense>
       }
     >

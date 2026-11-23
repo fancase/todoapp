@@ -24,12 +24,15 @@ const unique = (ids: (ObjectId | null)[]): ObjectId[] => {
 };
 
 /** One aggregation for all given plans (no N+1). */
-export async function loadWeeklyProgress(planIds: ObjectId[]): Promise<Map<string, WeeklyProgress>> {
+export async function loadWeeklyProgress(
+  userId: ObjectId,
+  planIds: ObjectId[],
+): Promise<Map<string, WeeklyProgress>> {
   const result = new Map<string, WeeklyProgress>();
   if (planIds.length === 0) return result;
   const rows = await todosCol()
     .aggregate<{ _id: ObjectId; total: number; done: number }>([
-      { $match: { weeklyPlanId: { $in: planIds } } },
+      { $match: { userId, weeklyPlanId: { $in: planIds } } },
       {
         $group: {
           _id: "$weeklyPlanId",
@@ -68,9 +71,9 @@ export function toTodoDto(todo: Todo, plan: WeeklyPlan | undefined): TodoDto {
 }
 
 /** Batch-load parent plans for todos (one query). */
-export async function toTodoDtos(todos: Todo[]): Promise<TodoDto[]> {
+export async function toTodoDtos(userId: ObjectId, todos: Todo[]): Promise<TodoDto[]> {
   const planIds = unique(todos.map((t) => t.weeklyPlanId));
-  const plans = planIds.length ? await plansCol().find({ _id: { $in: planIds } }).toArray() : [];
+  const plans = planIds.length ? await plansCol().find({ userId, _id: { $in: planIds } }).toArray() : [];
   const byId = new Map(plans.map((p) => [p._id.toHexString(), p]));
   return todos.map((t) => toTodoDto(t, t.weeklyPlanId ? byId.get(t.weeklyPlanId.toHexString()) : undefined));
 }
@@ -83,12 +86,12 @@ function outsideYear(plan: WeeklyPlan, year: number): boolean {
 }
 
 /** Batch-load progress and parent goals for plans (two queries). */
-export async function toWeeklyPlanDtos(plans: WeeklyPlan[]): Promise<WeeklyPlanDto[]> {
+export async function toWeeklyPlanDtos(userId: ObjectId, plans: WeeklyPlan[]): Promise<WeeklyPlanDto[]> {
   const [progress, goals] = await Promise.all([
-    loadWeeklyProgress(plans.map((p) => p._id)),
+    loadWeeklyProgress(userId, plans.map((p) => p._id)),
     (async () => {
       const ids = unique(plans.map((p) => p.goalId));
-      return ids.length ? goalsCol().find({ _id: { $in: ids } }).toArray() : [];
+      return ids.length ? goalsCol().find({ userId, _id: { $in: ids } }).toArray() : [];
     })(),
   ]);
   const goalById = new Map(goals.map((g) => [g._id.toHexString(), g]));
@@ -114,15 +117,16 @@ export async function toWeeklyPlanDtos(plans: WeeklyPlan[]): Promise<WeeklyPlanD
 
 /** Goals with raw yearly progress: 3 queries total regardless of count. */
 export async function toGoalDtos(
+  userId: ObjectId,
   goals: Goal[],
 ): Promise<{ dtos: GoalDto[]; plansByGoal: Map<string, WeeklyPlanDto[]> }> {
   const plans = goals.length
     ? await plansCol()
-        .find({ goalId: { $in: goals.map((g) => g._id) } })
+        .find({ userId, goalId: { $in: goals.map((g) => g._id) } })
         .sort({ startDate: 1, _id: 1 })
         .toArray()
     : [];
-  const planDtos = await toWeeklyPlanDtos(plans);
+  const planDtos = await toWeeklyPlanDtos(userId, plans);
   const plansByGoal = new Map<string, WeeklyPlanDto[]>();
   for (const p of planDtos) {
     const list = plansByGoal.get(p.goalId!) ?? [];

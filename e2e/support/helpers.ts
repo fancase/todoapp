@@ -4,6 +4,8 @@ import { expect, type APIRequestContext, type Locator, type Page } from "@playwr
 
 export interface RunState {
   baseURL: string;
+  githubUrl: string;
+  githubClientSecret: string;
   mongoUri: string;
   mongoDb: string;
   secret: string;
@@ -14,6 +16,37 @@ export const AUTH_FILE = resolve(__dirname, "../.run/auth.json");
 export function runState(): RunState {
   return JSON.parse(readFileSync(resolve(__dirname, "../.run/state.json"), "utf8")) as RunState;
 }
+
+/** Tells the fake GitHub which account the next authorize step signs in as. */
+export async function pickGithubUser(login: string): Promise<void> {
+  const res = await fetch(`${runState().githubUrl}/__use?login=${encodeURIComponent(login)}`, { method: "POST" });
+  if (!res.ok) throw new Error(`fake GitHub rejected __use: ${res.status}`);
+}
+
+/**
+ * Signs in through the real OAuth routes (fake GitHub behind them) without a browser and returns an
+ * API client that carries the resulting session cookie and a same-origin Origin header.
+ */
+export async function signInAs(playwright: PlaywrightLike, login: string, next = "/weekly"): Promise<APIRequestContext> {
+  const s = runState();
+  await pickGithubUser(login);
+  // An explicitly empty storage state: the project default (the shared owner session) must not leak in,
+  // or signing in would destroy it.
+  const ctx = await playwright.request.newContext({
+    baseURL: s.baseURL,
+    extraHTTPHeaders: { Origin: s.baseURL },
+    storageState: { cookies: [], origins: [] },
+  });
+  const res = await ctx.get(`/auth/github?next=${encodeURIComponent(next)}`);
+  expect(res.status(), "OAuth round trip should end on a page").toBe(200);
+  const landed = new URL(res.url()).pathname;
+  expect(landed).not.toBe("/login");
+  // "/" resolves to today's board, so only a specific next can be compared exactly.
+  if (next !== "/") expect(landed).toBe(next);
+  return ctx;
+}
+
+type PlaywrightLike = { request: { newContext: (o: object) => Promise<APIRequestContext> } };
 
 let seq = 0;
 /** Unique, readable titles so tests never collide inside the shared in-memory database. */

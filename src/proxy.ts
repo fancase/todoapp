@@ -7,7 +7,8 @@ import {
   verifySessionToken,
 } from "@/lib/auth";
 
-const PUBLIC_API = new Set(["/api/auth/login"]);
+// Exact paths only: nothing else under /auth is public by accident.
+const PUBLIC_PATHS = new Set(["/login", "/auth/github", "/auth/github/callback"]);
 
 function isApi(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
@@ -16,8 +17,7 @@ function isApi(pathname: string): boolean {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const api = isApi(pathname);
-  const isPublic =
-    PUBLIC_API.has(pathname) || pathname === "/login" || pathname.startsWith("/login/");
+  const isPublic = PUBLIC_PATHS.has(pathname);
 
   if (!isPublic) {
     const ok = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);

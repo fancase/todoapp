@@ -2,8 +2,32 @@ import type { ObjectId } from "mongodb";
 
 export type TodoStatus = "todo" | "doing" | "done";
 
+export interface User {
+  _id: ObjectId;
+  githubId: number;
+  username: string;
+  avatarUrl: string;
+  createdAt: Date;
+  lastLoginAt: Date;
+}
+
+/** Server-side session. `_id` is the random session id carried in the signed cookie. */
+export interface SessionDoc {
+  _id: string;
+  userId: ObjectId;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export interface CurrentUserDto {
+  id: string;
+  username: string;
+  avatarUrl: string;
+}
+
 export interface Goal {
   _id: ObjectId;
+  userId: ObjectId;
   title: string;
   year: number;
   createdAt: Date;
@@ -12,6 +36,7 @@ export interface Goal {
 
 export interface WeeklyPlan {
   _id: ObjectId;
+  userId: ObjectId;
   title: string;
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
@@ -22,6 +47,7 @@ export interface WeeklyPlan {
 
 export interface Todo {
   _id: ObjectId;
+  userId: ObjectId;
   title: string;
   date: string; // YYYY-MM-DD (no timezone shift)
   status: TodoStatus;

@@ -1,6 +1,9 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
+import { ObjectId } from "mongodb";
 import { jwtVerify, SignJWT } from "jose";
 import { getEnv } from "@/lib/env";
+import { sessionsCol } from "@/lib/collections";
 
 export const SESSION_COOKIE = "session";
 export const SESSION_MAX_AGE_SEC = 7 * 24 * 60 * 60;
@@ -14,26 +17,90 @@ function secretKey(): Uint8Array {
   return new TextEncoder().encode(getEnv().SESSION_SECRET);
 }
 
-export async function createSessionToken(): Promise<string> {
-  return new SignJWT({})
-    .setProtectedHeader({ alg: ALGORITHM })
-    .setSubject("owner")
-    .setIssuedAt()
-    .setExpirationTime(`${SESSION_MAX_AGE_SEC}s`)
-    .sign(secretKey());
+export interface SessionIdentity {
+  userId: ObjectId;
+  sid: string;
 }
 
-export async function verifySessionToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+const OBJECT_ID = /^[0-9a-f]{24}$/;
+
+/** Verifies signature, algorithm, expiry and claim shape. Does not look at the database. */
+async function parseToken(token: string | undefined): Promise<{ userId: string; sid: string } | null> {
+  if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, secretKey(), {
       algorithms: [ALGORITHM],
       requiredClaims: ["exp", "sub"],
     });
-    return payload.sub === "owner";
+    const { sub, sid } = payload;
+    if (typeof sub !== "string" || !OBJECT_ID.test(sub)) return null;
+    if (typeof sid !== "string" || sid.length < 16) return null;
+    return { userId: sub, sid };
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Cheap check for the proxy: a correctly signed, unexpired token. The database decides later. */
+export async function verifySessionToken(token: string | undefined): Promise<boolean> {
+  return (await parseToken(token)) !== null;
+}
+
+/** Creates the server-side session and returns the signed cookie value that points at it. */
+export async function createSession(userId: ObjectId): Promise<string> {
+  const sid = randomBytes(24).toString("base64url");
+  const now = new Date();
+  await sessionsCol().insertOne({
+    _id: sid,
+    userId,
+    createdAt: now,
+    expiresAt: new Date(now.getTime() + SESSION_MAX_AGE_SEC * 1000),
+  });
+  return new SignJWT({ sid })
+    .setProtectedHeader({ alg: ALGORITHM })
+    .setSubject(userId.toHexString())
+    .setIssuedAt()
+    .setExpirationTime(`${SESSION_MAX_AGE_SEC}s`)
+    .sign(secretKey());
+}
+
+/**
+ * The authoritative check: the token must be validly signed AND its session document must exist,
+ * be unexpired and belong to the same user. A deleted session invalidates the token everywhere.
+ */
+export async function resolveSession(token: string | undefined): Promise<SessionIdentity | null> {
+  const parsed = await parseToken(token);
+  if (!parsed) return null;
+  const doc = await sessionsCol().findOne({ _id: parsed.sid });
+  if (!doc || doc.expiresAt.getTime() <= Date.now()) return null;
+  if (doc.userId.toHexString() !== parsed.userId) return null;
+  return { userId: doc.userId, sid: doc._id };
+}
+
+/** Deletes the session behind a token. Safe to call with a stale or invalid token. */
+export async function destroySession(token: string | undefined): Promise<void> {
+  const parsed = await parseToken(token);
+  if (!parsed) return;
+  await sessionsCol().deleteOne({ _id: parsed.sid });
+}
+
+/** Reads one cookie from a Cookie header without depending on the framework request type. */
+export function getCookie(request: Request, name: string): string | undefined {
+  const header = request.headers.get("cookie");
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) {
+      const raw = part.slice(eq + 1).trim();
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    }
+  }
+  return undefined;
 }
 
 export function sessionCookieOptions() {

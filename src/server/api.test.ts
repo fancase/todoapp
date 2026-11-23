@@ -20,6 +20,10 @@ let getDb: () => Db;
 let closeClient: () => Promise<void>;
 
 const MISSING = "507f1f77bcf86cd799439011";
+const USER_A = new ObjectId();
+const USER_B = new ObjectId();
+let cookieA = "";
+let cookieB = "";
 
 beforeAll(async () => {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -29,6 +33,9 @@ beforeAll(async () => {
   const db = await import("@/lib/db");
   getDb = db.getDb;
   closeClient = () => db.getClient().close();
+  const auth = await import("@/lib/auth");
+  cookieA = `session=${await auth.createSession(USER_A)}`;
+  cookieB = `session=${await auth.createSession(USER_B)}`;
   todosRoute = (await import("@/app/api/todos/route")) as unknown as Routes;
   todoIdRoute = (await import("@/app/api/todos/[id]/route")) as unknown as Routes;
   plansRoute = (await import("@/app/api/weekly-plans/route")) as unknown as Routes;
@@ -54,15 +61,18 @@ interface CallOpts {
   id?: string;
   query?: string;
   raw?: string;
+  /** Who is signed in: user A by default, user B, or nobody. */
+  as?: "A" | "B" | "none";
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
 async function call(route: Routes, method: string, opts: CallOpts = {}): Promise<{ status: number; body: Json }> {
+  const cookie = opts.as === "none" ? undefined : opts.as === "B" ? cookieB : cookieA;
   const req = new Request(`http://localhost/api/x${opts.query ?? ""}`, {
     method,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
     body: opts.raw ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
   });
   const res = await route[method](req, { params: Promise.resolve({ id: opts.id ?? "" }) });
@@ -318,5 +328,154 @@ describe("deletion unlinks children (AC9, AC10)", () => {
     vi.restoreAllMocks();
     expect((await call(planIdRoute, "GET", { id: plan.id })).body.weeklyPlan.goalId).toBe(goal.id);
     expect((await call(goalIdRoute, "GET", { id: goal.id })).status).toBe(200);
+  });
+});
+
+describe("sign-in is required", () => {
+  it("every route answers 401 without a session and changes nothing", async () => {
+    const routes: [Routes, string][] = [
+      [todosRoute, "GET"],
+      [todosRoute, "POST"],
+      [todoIdRoute, "PATCH"],
+      [todoIdRoute, "DELETE"],
+      [plansRoute, "GET"],
+      [plansRoute, "POST"],
+      [planIdRoute, "GET"],
+      [planIdRoute, "PATCH"],
+      [planIdRoute, "DELETE"],
+      [goalsRoute, "GET"],
+      [goalsRoute, "POST"],
+      [goalIdRoute, "GET"],
+      [goalIdRoute, "PATCH"],
+      [goalIdRoute, "DELETE"],
+    ];
+    for (const [route, method] of routes) {
+      const r = await call(route, method, {
+        as: "none",
+        id: MISSING,
+        body: method === "GET" || method === "DELETE" ? undefined : { title: "x", date: "2026-03-02", year: 2026 },
+      });
+      expect(r.status, method).toBe(401);
+      expect(r.body.error.code).toBe("UNAUTHORIZED");
+    }
+    for (const c of ["todos", "weeklyPlans", "goals"]) {
+      expect(await getDb().collection(c).countDocuments()).toBe(0);
+    }
+  });
+
+  it("a validly signed token whose session was deleted is rejected", async () => {
+    const auth = await import("@/lib/auth");
+    const token = await auth.createSession(USER_A);
+    const ok = await call(goalsRoute, "GET", { as: "none" });
+    expect(ok.status).toBe(401);
+    const req = (cookie: string) =>
+      new Request("http://localhost/api/goals", { headers: { cookie: `session=${cookie}` } });
+    expect((await goalsRoute.GET(req(token), { params: Promise.resolve({ id: "" }) })).status).toBe(200);
+    await auth.destroySession(token);
+    expect((await goalsRoute.GET(req(token), { params: Promise.resolve({ id: "" }) })).status).toBe(401);
+  });
+});
+
+describe("each user sees only their own data", () => {
+  it("lists are separate, and new documents store the owner's userId", async () => {
+    const goalA = await mkGoal(2026, "A goal");
+    await mkPlan({ title: "A plan" });
+    await mkTodo({ title: "A todo" });
+    const asB = async (route: Routes, body: Json) => (await call(route, "POST", { as: "B", body })).body;
+    await asB(goalsRoute, { title: "B goal", year: 2026 });
+    await asB(plansRoute, { title: "B plan", startDate: "2026-03-02", endDate: "2026-03-08" });
+    await asB(todosRoute, { title: "B todo", date: "2026-03-02" });
+
+    const titles = async (route: Routes, key: string, as: "A" | "B") =>
+      ((await call(route, "GET", { as, query: route === todosRoute ? "?date=2026-03-02" : "" })).body[key] as Json[]).map(
+        (x) => x.title,
+      );
+    expect(await titles(todosRoute, "todos", "A")).toEqual(["A todo"]);
+    expect(await titles(todosRoute, "todos", "B")).toEqual(["B todo"]);
+    expect(await titles(plansRoute, "weeklyPlans", "A")).toEqual(["A plan"]);
+    expect(await titles(plansRoute, "weeklyPlans", "B")).toEqual(["B plan"]);
+    expect(await titles(goalsRoute, "goals", "A")).toEqual(["A goal"]);
+    expect(await titles(goalsRoute, "goals", "B")).toEqual(["B goal"]);
+
+    const stored = await getDb().collection("goals").findOne({ _id: new ObjectId(goalA.id) });
+    expect(stored?.userId.equals(USER_A)).toBe(true);
+    expect(JSON.stringify(goalA)).not.toContain("userId");
+  });
+
+  it("another user's ids are 404 for read, update and delete, and nothing changes", async () => {
+    const goal = await mkGoal();
+    const plan = await mkPlan({ goalId: goal.id });
+    const todo = await mkTodo({ weeklyPlanId: plan.id, title: "mine" });
+
+    const probes: [Routes, string, string, Json?][] = [
+      [todoIdRoute, "PATCH", todo.id, { title: "hacked" }],
+      [todoIdRoute, "DELETE", todo.id],
+      [planIdRoute, "GET", plan.id],
+      [planIdRoute, "PATCH", plan.id, { title: "hacked" }],
+      [planIdRoute, "DELETE", plan.id],
+      [goalIdRoute, "GET", goal.id],
+      [goalIdRoute, "PATCH", goal.id, { title: "hacked" }],
+      [goalIdRoute, "DELETE", goal.id],
+    ];
+    for (const [route, method, id, body] of probes) {
+      const r = await call(route, method, { as: "B", id, body });
+      expect(r.status, `${method} ${id}`).toBe(404);
+    }
+
+    const todos = (await call(todosRoute, "GET", { query: "?date=2026-03-02" })).body.todos as Json[];
+    expect(todos.map((t) => t.title)).toEqual(["mine"]);
+    const p = (await call(planIdRoute, "GET", { id: plan.id })).body.weeklyPlan;
+    expect(p.title).toBe("plan");
+    expect(p.todos).toHaveLength(1);
+    expect((await call(goalIdRoute, "GET", { id: goal.id })).body.goal.title).toBe("goal");
+  });
+
+  it("linking to another user's plan or goal is a 400, on create and on update", async () => {
+    const goalB = (await call(goalsRoute, "POST", { as: "B", body: { title: "b", year: 2026 } })).body.goal;
+    const planB = (
+      await call(plansRoute, "POST", {
+        as: "B",
+        body: { title: "b", startDate: "2026-03-02", endDate: "2026-03-08" },
+      })
+    ).body.weeklyPlan;
+
+    const t = await call(todosRoute, "POST", { body: { title: "a", date: "2026-03-02", weeklyPlanId: planB.id } });
+    expect(t.status).toBe(400);
+    const w = await call(plansRoute, "POST", {
+      body: { title: "a", startDate: "2026-03-02", endDate: "2026-03-08", goalId: goalB.id },
+    });
+    expect(w.status).toBe(400);
+
+    const todoA = await mkTodo();
+    const planA = await mkPlan();
+    expect((await call(todoIdRoute, "PATCH", { id: todoA.id, body: { weeklyPlanId: planB.id } })).status).toBe(400);
+    expect((await call(planIdRoute, "PATCH", { id: planA.id, body: { goalId: goalB.id } })).status).toBe(400);
+  });
+
+  it("deleting a parent only unlinks the same user's children, and progress ignores other users", async () => {
+    const goalA = await mkGoal();
+    const planA = await mkPlan({ goalId: goalA.id });
+    await mkTodo({ weeklyPlanId: planA.id, status: "done" });
+
+    // Simulate a stray foreign document that points at A's plan: it must not count or be unlinked.
+    const foreignTodo = new ObjectId();
+    await getDb().collection("todos").insertOne({
+      _id: foreignTodo,
+      userId: USER_B,
+      title: "foreign",
+      date: "2026-03-02",
+      status: "todo",
+      weeklyPlanId: new ObjectId(planA.id),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const detail = (await call(planIdRoute, "GET", { id: planA.id })).body.weeklyPlan;
+    expect(detail.progress).toEqual({ done: 1, total: 1, percent: 100 });
+    expect(detail.todos).toHaveLength(1);
+
+    const del = await call(planIdRoute, "DELETE", { id: planA.id });
+    expect(del.body).toEqual({ deleted: true, unlinkedTodos: 1 });
+    const foreign = await getDb().collection("todos").findOne({ _id: foreignTodo });
+    expect(foreign?.weeklyPlanId?.toHexString()).toBe(planA.id);
   });
 });

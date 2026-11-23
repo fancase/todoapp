@@ -105,7 +105,17 @@ export function BrandMark() {
   );
 }
 
-export function AppShell({ topNav, bottomNav, children }: { topNav: ReactNode; bottomNav: ReactNode; children: ReactNode }) {
+export function AppShell({
+  topNav,
+  bottomNav,
+  userSlot,
+  children,
+}: {
+  topNav: ReactNode;
+  bottomNav: ReactNode;
+  userSlot: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="sticky top-0 z-30 border-b bg-background/90 backdrop-blur">
@@ -116,7 +126,10 @@ export function AppShell({ topNav, bottomNav, children }: { topNav: ReactNode; b
               {topNav}
             </nav>
           </div>
-          <LogoutButton />
+          <div className="flex items-center gap-2">
+            {userSlot}
+            <LogoutButton />
+          </div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 px-4 pt-6 pb-28 sm:px-6 md:pb-12">{children}</main>

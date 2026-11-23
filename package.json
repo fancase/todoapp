@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "db:indexes": "tsx scripts/ensure-indexes.ts",
-    "db:check": "tsx scripts/check-db.ts"
+    "db:check": "tsx scripts/check-db.ts",
+    "db:migrate-user": "tsx scripts/migrate-user-id.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

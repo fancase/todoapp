@@ -77,7 +77,7 @@ test.describe("AC11: unauthenticated requests", () => {
       const context = await browser.newContext({ baseURL: s.baseURL });
       const page = await context.newPage();
       await page.goto(`/login?next=${encodeURIComponent(evil)}`);
-      await page.getByTestId("login-submit").click();
+      await page.getByTestId("login-github").click();
       // "/" resolves to today's board; waiting for it also means no navigation is still in flight.
       await expect(page).toHaveURL(/\/board\/\d{4}-\d{2}-\d{2}$/);
       expect(new URL(page.url()).origin).toBe(s.baseURL);
@@ -85,17 +85,20 @@ test.describe("AC11: unauthenticated requests", () => {
     }
   });
 
-  test("login needs no password and shows no password field", async ({ page }) => {
+  test("the login page offers GitHub only: no password field, no anonymous way in", async ({ page }) => {
     await page.goto("/login");
+    await expect(page.getByTestId("login-github")).toBeVisible();
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
-    await page.getByTestId("login-submit").click();
-    await expect(page).toHaveURL(/\/board\/\d{4}-\d{2}-\d{2}$/);
+    await expect(page.getByTestId("login-github")).toHaveAttribute("href", "/auth/github");
+    // The old passwordless login route is gone: with no session the proxy answers 401 first.
+    const res = await page.request.post("/api/auth/login", { data: {}, headers: { Origin: runState().baseURL } });
+    expect(res.status()).toBe(401);
   });
 
   test("login redirects to the original page after success", async ({ page }) => {
     await page.goto("/weekly");
     await expect(page).toHaveURL(/\/login\?next=%2Fweekly/);
-    await page.getByTestId("login-submit").click();
+    await page.getByTestId("login-github").click();
     await expect(page).toHaveURL(/\/weekly$/);
     await expect(page.getByTestId("nav-weekly").first()).toHaveAttribute("aria-current", "page");
   });
@@ -133,7 +136,7 @@ test.describe("origin check on mutating requests", () => {
 });
 
 test.describe("AC12: secrets stay out of the client", () => {
-  test("the client bundle and served HTML contain neither SESSION_SECRET nor the Mongo URI", async ({ page }) => {
+  test("the client bundle and served HTML contain neither SESSION_SECRET, the GitHub client secret nor the Mongo URI", async ({ page }) => {
     const s = runState();
     const staticDir = resolve(__dirname, "../.next/static");
     const files: string[] = [];
@@ -146,7 +149,7 @@ test.describe("AC12: secrets stay out of the client", () => {
     };
     walk(staticDir);
     expect(files.length).toBeGreaterThan(0);
-    const secrets = [s.secret, s.mongoUri, new URL(s.mongoUri).host];
+    const secrets = [s.secret, s.githubClientSecret, s.mongoUri, new URL(s.mongoUri).host];
     for (const f of files) {
       const text = readFileSync(f, "utf8");
       for (const secret of secrets) expect(text.includes(secret), `${f} leaks a secret`).toBe(false);

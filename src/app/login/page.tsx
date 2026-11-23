@@ -1,22 +1,47 @@
 import { Suspense } from "react";
+import { buttonVariants } from "@/components/ui/button";
 import { safeNextPath } from "@/lib/safe-next";
-import { LoginForm } from "./login-form";
+import { cn } from "@/lib/utils";
 
-async function LoginFormWithNext({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string | string[] }>;
-}) {
-  const { next } = await searchParams;
-  const raw = Array.isArray(next) ? next[0] : next;
-  return <LoginForm next={safeNextPath(raw)} />;
+type SearchParams = Promise<{ next?: string | string[]; error?: string | string[] }>;
+
+const ERROR_MESSAGES: Record<string, string> = {
+  denied: "GitHub 로그인이 취소되었습니다.",
+  state: "로그인 요청이 만료되었거나 올바르지 않습니다. 다시 시도해 주세요.",
+  github: "GitHub와 통신하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+  not_configured: "GitHub 로그인이 아직 설정되지 않았습니다. 관리자에게 문의하세요.",
+  server: "로그인 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+};
+
+const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+async function LoginActions({ searchParams }: { searchParams: SearchParams }) {
+  const params = await searchParams;
+  const next = safeNextPath(first(params.next));
+  const errorKey = first(params.error);
+  const error = errorKey ? (ERROR_MESSAGES[errorKey] ?? "로그인하지 못했습니다. 다시 시도해 주세요.") : null;
+  const href = next === "/" ? "/auth/github" : `/auth/github?next=${encodeURIComponent(next)}`;
+
+  return (
+    <div className="flex flex-col gap-4" data-testid="login-form">
+      {error && (
+        <p role="alert" data-testid="login-error" className="text-sm font-medium text-destructive">
+          {error}
+        </p>
+      )}
+      {/* A real navigation, not <Link>: prefetching this URL would start an OAuth flow. */}
+      <a
+        href={href}
+        data-testid="login-github"
+        className={cn(buttonVariants({ size: "lg" }), "h-10 text-sm font-semibold")}
+      >
+        GitHub로 로그인
+      </a>
+    </div>
+  );
 }
 
-export default function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string | string[] }>;
-}) {
+export default function LoginPage({ searchParams }: { searchParams: SearchParams }) {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-6 py-10">
       <div className="flex flex-col gap-2">
@@ -35,7 +60,7 @@ export default function LoginPage({
       </div>
       <div className="rounded-2xl border bg-card p-5 shadow-xs">
         <Suspense fallback={null}>
-          <LoginFormWithNext searchParams={searchParams} />
+          <LoginActions searchParams={searchParams} />
         </Suspense>
       </div>
     </main>
