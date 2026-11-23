@@ -1,0 +1,151 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-plex-kr), "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --color-status-todo: var(--status-todo);
+  --color-status-doing: var(--status-doing);
+  --color-status-done: var(--status-done);
+  --color-status-todo-soft: var(--status-todo-soft);
+  --color-status-doing-soft: var(--status-doing-soft);
+  --color-status-done-soft: var(--status-done-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Palette: cool sage paper, pine ink, one deep-teal accent. Status hues stay distinct
+   from the accent so a card's state reads at a glance without leaning on color alone. */
+:root {
+  --background: #f2f5f1;
+  --foreground: #16201c;
+  --card: #ffffff;
+  --card-foreground: #16201c;
+  --popover: #ffffff;
+  --popover-foreground: #16201c;
+  --primary: #0d5c55;
+  --primary-foreground: #f4fbf9;
+  --secondary: #e6ece7;
+  --secondary-foreground: #16201c;
+  --muted: #e6ece7;
+  --muted-foreground: #4f5d57;
+  --accent: #dfe8e2;
+  --accent-foreground: #16201c;
+  --destructive: #b3261e;
+  --border: #d3dbd5;
+  --input: #bcc8c0;
+  --ring: #0d5c55;
+  --radius: 0.75rem;
+
+  --status-todo: #4d5f6b;
+  --status-todo-soft: #e4eaee;
+  --status-doing: #8f5200;
+  --status-doing-soft: #fbefd5;
+  --status-done: #176b43;
+  --status-done-soft: #dff1e6;
+  --warn: #8a4b00;
+  --warn-soft: #fdf0d8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f1512;
+    --foreground: #e5ede8;
+    --card: #17201c;
+    --card-foreground: #e5ede8;
+    --popover: #17201c;
+    --popover-foreground: #e5ede8;
+    --primary: #5fc4b4;
+    --primary-foreground: #06231f;
+    --secondary: #1f2b26;
+    --secondary-foreground: #e5ede8;
+    --muted: #1f2b26;
+    --muted-foreground: #9fb0a8;
+    --accent: #25332d;
+    --accent-foreground: #e5ede8;
+    --destructive: #f2877f;
+    --border: #2b3932;
+    --input: #3a4a42;
+    --ring: #5fc4b4;
+
+    --status-todo: #a9bbc7;
+    --status-todo-soft: #222e36;
+    --status-doing: #f0b25a;
+    --status-doing-soft: #34290f;
+    --status-done: #6fd39b;
+    --status-done-soft: #14301f;
+    --warn: #f0b25a;
+    --warn-soft: #34290f;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    overflow-x: hidden;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
